@@ -11,14 +11,13 @@ struct ToDoApp: App {
     }
 }
 
-
 struct LaunchScreenView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 20) {
                 Text("Student 1: Michael Mocioiu - ID: 101459108")
                 Text("Student 2: Leonid Serebryannikov - ID: 101468805")
-                Text("Student 3: Ivan Zakrevskyi - ID: 987654")
+                Text("Student 3: Ivan Zakrevskyi - ID: 101419665")
                 
                 NavigationLink(destination: TaskListView()) {
                     Text("Go to App")
@@ -32,7 +31,6 @@ struct LaunchScreenView: View {
         }
     }
 }
-
 
 struct Task: Identifiable {
     let id = UUID()
@@ -76,7 +74,7 @@ struct TaskListView: View {
         }
         .navigationTitle("To-Do List")
         .toolbar {
-            NavigationLink(destination: TaskCreateView()) {
+            NavigationLink(destination: TaskCreateView(viewModel: viewModel)) {
                 Image(systemName: "plus")
             }
         }
@@ -106,10 +104,19 @@ struct TaskRow: View {
 }
 
 struct TaskCreateView: View {
+    @ObservedObject var viewModel: TaskViewModel
+    @Environment(\.presentationMode) var presentationMode
+    @State private var title: String = ""
+    @State private var dueDate: Date = Date()
     
     var body: some View {
         Form {
-            
+            TextField("Task Title", text: $title)
+            DatePicker("Due Date & Time", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
+            Button("Save") {
+                viewModel.tasks.append(Task(title: title, dueDate: dueDate))
+                presentationMode.wrappedValue.dismiss()
+            }
         }
         .navigationTitle("New Task")
     }
