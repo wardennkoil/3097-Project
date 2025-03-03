@@ -34,15 +34,73 @@ struct LaunchScreenView: View {
 }
 
 
+struct Task: Identifiable {
+    let id = UUID()
+    var title: String
+    var dueDate: Date
+}
+
+class TaskViewModel: ObservableObject {
+    @Published var tasks: [Task] = [
+        Task(title: "Buy groceries", dueDate: Date().addingTimeInterval(3600)),
+        Task(title: "Finish assignment", dueDate: Date().addingTimeInterval(-3600))
+    ]
+    
+    func deleteTask(_ task: Task) {
+        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks.remove(at: index)
+        }
+    }
+}
+
 struct TaskListView: View {
+    @StateObject var viewModel = TaskViewModel()
+    
+    var groupedTasks: [String: [Task]] {
+        Dictionary(grouping: viewModel.tasks) { task in
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            return formatter.string(from: task.dueDate)
+        }
+    }
+    
     var body: some View {
         List {
+            ForEach(groupedTasks.keys.sorted(), id: \.self) { date in
+                Section(header: Text(date).font(.headline)) {
+                    ForEach(groupedTasks[date] ?? []) { task in
+                        TaskRow(task: task, viewModel: viewModel)
+                    }
+                }
+            }
         }
         .navigationTitle("To-Do List")
         .toolbar {
             NavigationLink(destination: TaskCreateView()) {
                 Image(systemName: "plus")
             }
+        }
+    }
+}
+
+struct TaskRow: View {
+    var task: Task
+    @ObservedObject var viewModel: TaskViewModel
+    
+    var body: some View {
+        HStack {
+            Text(task.title)
+            Spacer()
+            Text(task.dueDate, style: .time)
+                .foregroundColor(.gray)
+            
+            Button(action: {
+                viewModel.deleteTask(task)
+            }) {
+                Image(systemName: "checkmark.circle")
+                    .foregroundColor(.green)
+            }
+            .buttonStyle(BorderlessButtonStyle()) // Ensures only button triggers action
         }
     }
 }
