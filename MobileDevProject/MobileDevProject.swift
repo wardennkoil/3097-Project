@@ -32,22 +32,86 @@ struct LaunchScreenView: View {
     }
 }
 
-struct Task: Identifiable {
-    let id = UUID()
+struct Task: Identifiable, Codable {
+    let id: UUID
     var title: String
     var dueDate: Date
+    var isCompleted: Bool = false
+    
+    // Check if the task is overdue.
+    var isOverdue: Bool {
+        return !isCompleted && Date() > dueDate
+    }
+    
+    // Check if the task is due soon (within the next hour).
+    var isDueSoon: Bool {
+        return !isCompleted && dueDate > Date() && dueDate.timeIntervalSince(Date()) < 3600
+    }
 }
 
 class TaskViewModel: ObservableObject {
-    @Published var tasks: [Task] = [
-        Task(title: "Buy groceries", dueDate: Date().addingTimeInterval(3600)),
-        Task(title: "Finish assignment", dueDate: Date().addingTimeInterval(-3600))
-    ]
+    @Published var tasks: [Task] = [] {
+        didSet {
+            saveTasks()
+        }
+    }
+    
+    private let tasksFile = "tasks.json"
+    
+    init() {
+        loadTasks()
+        if tasks.isEmpty {
+            tasks = [
+                Task(id: UUID(), title: "Buy groceries", dueDate: Date().addingTimeInterval(3600)),
+                Task(id: UUID(), title: "Finish assignment", dueDate: Date().addingTimeInterval(-3600))
+            ]
+        }
+    }
     
     func deleteTask(_ task: Task) {
         if let index = tasks.firstIndex(where: { $0.id == task.id }) {
             tasks.remove(at: index)
         }
+    }
+    
+    func toggleTaskCompletion(_ task: Task) {
+        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks[index].isCompleted.toggle()
+        }
+    }
+    
+    private func saveTasks() {
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(tasks)
+            if let url = getTasksFileURL() {
+                try data.write(to: url)
+            }
+        } catch {
+            print("Error saving tasks: \(error)")
+        }
+    }
+    
+    private func loadTasks() {
+        do {
+            if let url = getTasksFileURL(), FileManager.default.fileExists(atPath: url.path) {
+                let data = try Data(contentsOf: url)
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                tasks = try decoder.decode([Task].self, from: data)
+            }
+        } catch {
+            print("Error loading tasks: \(error)")
+        }
+    }
+    
+    private func getTasksFileURL() -> URL? {
+        let manager = FileManager.default
+        if let documents = manager.urls(for: .documentDirectory, in: .userDomainMask).first {
+            return documents.appendingPathComponent(tasksFile)
+        }
+        return nil
     }
 }
 
@@ -88,17 +152,17 @@ struct TaskRow: View {
     var body: some View {
         HStack {
             Text(task.title)
+                .strikethrough(task.isCompleted)
             Spacer()
             Text(task.dueDate, style: .time)
-                .foregroundColor(.gray)
-            
+                .foregroundColor(task.isDueSoon ? .orange : .gray)
             Button(action: {
-                viewModel.deleteTask(task)
+                viewModel.toggleTaskCompletion(task)
             }) {
-                Image(systemName: "checkmark.circle")
-                    .foregroundColor(.green)
+                Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(task.isCompleted ? .green : .gray)
             }
-            .buttonStyle(BorderlessButtonStyle()) // Ensures only button triggers action
+            .buttonStyle(BorderlessButtonStyle())
         }
     }
 }
@@ -114,7 +178,7 @@ struct TaskCreateView: View {
             TextField("Task Title", text: $title)
             DatePicker("Due Date & Time", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
             Button("Save") {
-                viewModel.tasks.append(Task(title: title, dueDate: dueDate))
+                viewModel.tasks.append(Task(id: UUID(), title: title, dueDate: dueDate))
                 presentationMode.wrappedValue.dismiss()
             }
         }
