@@ -9,7 +9,9 @@ struct TaskTypeModel: Codable, Identifiable, Equatable, Hashable {
 
 class TaskTypeViewModel: ObservableObject {
     @Published var types: [TaskTypeModel] = [] {
-        didSet { saveTypes() }
+        didSet {
+            saveTypes()
+        }
     }
     
     private let typesFile = "taskTypes.json"
@@ -17,6 +19,7 @@ class TaskTypeViewModel: ObservableObject {
     init() {
         loadTypes()
         if types.isEmpty {
+            // Prepopulate with default types if no file exists
             types = [
                 TaskTypeModel(id: UUID(), name: "Personal"),
                 TaskTypeModel(id: UUID(), name: "Work"),
@@ -64,41 +67,40 @@ class TaskTypeViewModel: ObservableObject {
     }
 }
 
-// MARK: - Updated Task Model
+
+// MARK: - Task Model
 
 struct Task: Identifiable, Codable {
     let id: UUID
     var title: String
     var dueDate: Date
+    var type: TaskTypeModel
     var isCompleted: Bool = false
-    var type: TaskTypeModel  // New property for task categorization
     
+    // Computed property to check if the task is overdue.
     var isOverdue: Bool {
         return !isCompleted && Date() > dueDate
     }
     
+    // Computed property to check if the task is due soon (e.g., within the next hour)
     var isDueSoon: Bool {
         return !isCompleted && dueDate > Date() && dueDate.timeIntervalSince(Date()) < 3600
     }
 }
 
+// MARK: - TaskViewModel with Persistence
+
 class TaskViewModel: ObservableObject {
     @Published var tasks: [Task] = [] {
-        didSet { saveTasks() }
+        didSet {
+            saveTasks()
+        }
     }
     
     private let tasksFile = "tasks.json"
     
     init() {
         loadTasks()
-        if tasks.isEmpty {
-            // Create a default type for legacy tasks.
-            let defaultType = TaskTypeModel(id: UUID(), name: "General")
-            tasks = [
-                Task(id: UUID(), title: "Buy groceries", dueDate: Date().addingTimeInterval(3600), type: defaultType),
-                Task(id: UUID(), title: "Finish assignment", dueDate: Date().addingTimeInterval(-3600), type: defaultType)
-            ]
-        }
     }
     
     func addTask(_ task: Task) {
@@ -117,6 +119,15 @@ class TaskViewModel: ObservableObject {
         }
     }
     
+    func updateTask(_ task: Task, title: String, dueDate: Date, type: TaskTypeModel) {
+        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks[index].title = title
+            tasks[index].dueDate = dueDate
+            tasks[index].type = type
+        }
+    }
+    
+    // Save tasks to persistent storage
     private func saveTasks() {
         do {
             let encoder = JSONEncoder()
@@ -130,6 +141,7 @@ class TaskViewModel: ObservableObject {
         }
     }
     
+    // Load tasks from persistent storage
     private func loadTasks() {
         do {
             if let url = getTasksFileURL(), FileManager.default.fileExists(atPath: url.path) {
@@ -137,6 +149,12 @@ class TaskViewModel: ObservableObject {
                 let decoder = JSONDecoder()
                 decoder.dateDecodingStrategy = .iso8601
                 tasks = try decoder.decode([Task].self, from: data)
+            } else {
+                // Preload with sample tasks if file does not exist
+                tasks = [
+                    Task(id: UUID(), title: "Buy groceries", dueDate: Date().addingTimeInterval(3600), type: TaskTypeModel(id: UUID(), name: "Personal")),
+                    Task(id: UUID(), title: "Finish assignment", dueDate: Date().addingTimeInterval(-3600), type: TaskTypeModel(id: UUID(), name: "Urgent"))
+                ]
             }
         } catch {
             print("Error loading tasks: \(error)")
@@ -152,56 +170,128 @@ class TaskViewModel: ObservableObject {
     }
 }
 
-struct LaunchScreenView: View {
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 20) {
-                Text("Student 1: Michael Mocioiu - ID: 101459108")
-                Text("Student 2: Leonid Serebryannikov - ID: 101468805")
-                Text("Student 3: Ivan Zakrevskyi - ID: 101419665")
-                
-                NavigationLink(destination: TaskListView()) {
-                    Text("Go to App")
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
-                }
+// MARK: - Launch Screen
+
+@main
+struct ToDoApp: App {
+    var body: some Scene {
+        WindowGroup {
+            NavigationView {
+                LaunchScreenView()
             }
-            .navigationTitle("Welcome")
         }
     }
 }
 
-struct TaskListView: View {
-    @StateObject var viewModel = TaskViewModel()
-    
-    var groupedTasks: [String: [Task]] {
-        Dictionary(grouping: viewModel.tasks) { task in
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            return formatter.string(from: task.dueDate)
+struct LaunchScreenView: View {
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("Student 1: Michael Mocioiu - ID: 101459108")
+            Text("Student 2: Leonid Serebryannikov - ID: 101468805")
+            Text("Student 3: Ivan Zakrevskyi - ID: 101419665")
+            
+            NavigationLink(destination: MainTasksView()) {
+                Text("Go to App")
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+            }
+        }
+        .navigationTitle("Welcome")
+    }
+}
+
+// MARK: - Main Tasks View with TabView
+
+struct MainTasksView: View {
+    @StateObject var taskViewModel = TaskViewModel()
+    @StateObject var taskTypeViewModel = TaskTypeViewModel()
+
+    var body: some View {
+        TabView {
+            ActiveTasksView(viewModel: taskViewModel, typeViewModel: taskTypeViewModel)
+                .tabItem {
+                    Label("Active", systemImage: "list.bullet")
+                }
+            CompletedTasksView(viewModel: taskViewModel, typeViewModel: taskTypeViewModel)
+                .tabItem {
+                    Label("Completed", systemImage: "checkmark.circle")
+                }
         }
     }
-    
+}
+
+// MARK: - Active Tasks View
+
+struct ActiveTasksView: View {
+    @ObservedObject var viewModel: TaskViewModel
+    @ObservedObject var typeViewModel: TaskTypeViewModel
+
+    var activeTasks: [Task] { viewModel.tasks.filter { !$0.isCompleted } }
+
     var body: some View {
-        List {
-            ForEach(groupedTasks.keys.sorted(), id: \.self) { date in
-                Section(header: Text(date).font(.headline)) {
-                    ForEach(groupedTasks[date] ?? []) { task in
+        NavigationView {
+            List {
+                ForEach(activeTasks) { task in
+                    NavigationLink(destination: EditTaskView(task: task, viewModel: viewModel, typeViewModel: typeViewModel)) {
                         TaskRow(task: task, viewModel: viewModel)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            viewModel.deleteTask(task)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
                     }
                 }
             }
-        }
-        .navigationTitle("To-Do List")
-        .toolbar {
-            NavigationLink(destination: TaskCreateView(viewModel: viewModel, typeViewModel: TaskTypeViewModel())) {
-                Image(systemName: "plus")
+            .navigationTitle("Active Tasks")
+            .toolbar {
+                NavigationLink(destination: TaskCreateView(viewModel: viewModel, typeViewModel: typeViewModel)) {
+                    Image(systemName: "plus")
+                }
             }
         }
     }
 }
+
+// MARK: - Completed Tasks View
+
+struct CompletedTasksView: View {
+    @ObservedObject var viewModel: TaskViewModel
+    @ObservedObject var typeViewModel: TaskTypeViewModel
+
+    var completedTasks: [Task] { viewModel.tasks.filter { $0.isCompleted } }
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(completedTasks) { task in
+                    NavigationLink(destination: EditTaskView(task: task, viewModel: viewModel, typeViewModel: typeViewModel)) {
+                        TaskRow(task: task, viewModel: viewModel)
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            viewModel.deleteTask(task)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        Button {
+                            viewModel.toggleTaskCompletion(task) // Restore the task
+                        } label: {
+                            Label("Restore", systemImage: "arrow.uturn.backward")
+                        }
+                        .tint(.blue)
+                    }
+                }
+            }
+            .navigationTitle("Completed Tasks")
+        }
+    }
+}
+
+// MARK: - Task Row
 
 struct TaskRow: View {
     var task: Task
@@ -212,13 +302,21 @@ struct TaskRow: View {
             VStack(alignment: .leading) {
                 Text(task.title)
                     .strikethrough(task.isCompleted)
+                    .foregroundColor(task.isOverdue ? .red : .primary)
                 Text(task.type.name)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
             Spacer()
-            Text(task.dueDate, style: .time)
-                .foregroundColor(task.isDueSoon ? .orange : .gray)
+            VStack(alignment: .trailing) {
+                Text(task.dueDate, style: .time)
+                    .foregroundColor(task.isDueSoon ? .orange : .gray)
+                if task.isOverdue {
+                    Text("Past Due")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                }
+            }
             Button(action: {
                 viewModel.toggleTaskCompletion(task)
             }) {
@@ -229,6 +327,8 @@ struct TaskRow: View {
         }
     }
 }
+
+// MARK: - Task Creation View
 
 struct TaskCreateView: View {
     @ObservedObject var viewModel: TaskViewModel
@@ -265,6 +365,48 @@ struct TaskCreateView: View {
         .navigationTitle("New Task")
     }
 }
+
+// MARK: - Edit Task View
+
+struct EditTaskView: View {
+    var task: Task
+    @ObservedObject var viewModel: TaskViewModel
+    @ObservedObject var typeViewModel: TaskTypeViewModel
+    @State private var title: String
+    @State private var dueDate: Date
+    @State private var selectedType: TaskTypeModel
+    @Environment(\.presentationMode) var presentationMode
+    
+    init(task: Task, viewModel: TaskViewModel, typeViewModel: TaskTypeViewModel) {
+        self.task = task
+        self.viewModel = viewModel
+        self.typeViewModel = typeViewModel
+        _title = State(initialValue: task.title)
+        _dueDate = State(initialValue: task.dueDate)
+        _selectedType = State(initialValue: task.type)
+    }
+    
+    var body: some View {
+        Form {
+            Section(header: Text("Edit Task Info")) {
+                TextField("Task Title", text: $title)
+                DatePicker("Due Date & Time", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
+                Picker("Task Type", selection: $selectedType) {
+                    ForEach(typeViewModel.types) { type in
+                        Text(type.name).tag(type)
+                    }
+                }
+            }
+            Button("Save") {
+                viewModel.updateTask(task, title: title, dueDate: dueDate, type: selectedType)
+                presentationMode.wrappedValue.dismiss()
+            }
+        }
+        .navigationTitle("Edit Task")
+    }
+}
+
+// MARK: - Add New Task Type View
 
 struct AddTaskTypeView: View {
     @ObservedObject var typeViewModel: TaskTypeViewModel
